@@ -105,7 +105,7 @@ const StudentDashboard = () => {
           <div className="section-header">
             <h2><FaBookOpen /> My Courses</h2>
             {enrolledCourses.length > 3 && (
-              <Link to="/student/courses" className="view-all">View All</Link>
+              <Link to="/courses" className="view-all">View All</Link>
             )}
           </div>
           {enrolledCourses.length > 0 ? (

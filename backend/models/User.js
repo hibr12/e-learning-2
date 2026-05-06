@@ -9,7 +9,16 @@ const certificateSchema = new mongoose.Schema(
     completedAt: { type: Date, default: Date.now },
     certificateNumber: { type: String, required: true }
   },
-  { _id: true }
+  {
+    _id: true,
+    toJSON: {
+      transform: (_doc, ret) => {
+        ret.id = ret._id.toString();
+        delete ret._id;
+        return ret;
+      }
+    }
+  }
 );
 
 const userSchema = new mongoose.Schema(
