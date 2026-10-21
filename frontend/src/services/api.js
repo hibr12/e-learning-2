@@ -1,5 +1,25 @@
 const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
 
+const TOKEN_KEY = 'api_token';
+
+export const getToken = () => {
+  try {
+    return localStorage.getItem(TOKEN_KEY) || '';
+  } catch {
+    return '';
+  }
+};
+
+export const setToken = (token) => {
+  try {
+    if (token) {
+      localStorage.setItem(TOKEN_KEY, token);
+    } else {
+      localStorage.removeItem(TOKEN_KEY);
+    }
+  } catch { }
+};
+
 export const apiRequest = async (path, options = {}) => {
   const token = getToken();
   const headers = {

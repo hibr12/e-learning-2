@@ -32,9 +32,16 @@ app.use((err, _req, res, _next) => {
   res.status(err.status || 500).json({ message: err.message || 'Server error' });
 });
 
-await connectDb();
-await seedDatabase();
-
-app.listen(port, () => {
-  console.log(`API server running on http://localhost:${port}`);
+connectDb().then(() => {
+  seedDatabase().then(() => {
+    app.listen(port, () => {
+      console.log(`API server running on http://localhost:${port}`);
+    });
+  }).catch(err => {
+    console.error('Failed to seed database', err);
+    process.exit(1);
+  });
+}).catch(err => {
+  console.error('Failed to connect to database', err);
+  process.exit(1);
 });
