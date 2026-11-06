@@ -4,12 +4,92 @@ import Course from '../models/Course.js';
 import User from '../models/User.js';
 import { optionalAuth, requireAuth, requireRole } from '../middleware/auth.js';
 import { asyncHandler, notFound } from '../utils/errors.js';
+import multer from 'multer';
+import path from 'path';
+
+// Use absolute path for uploads directory
+const UPLOADS_DIR = path.resolve(process.cwd(), 'uploads');
+const upload = multer({ dest: UPLOADS_DIR, limits: { fileSize: 10 * 1024 * 1024 } });
 
 const router = express.Router();
 
 const canEditCourse = (user, course) => {
   return user.role === 'admin' || (user.role === 'instructor' && course.instructorId === user.id);
 };
+
+// ---------- PDF File Serving Route ----------
+// Serves PDF files with enrollment authorization check
+router.get(
+  '/courses/:courseId/lessons/:lessonId/pdf',
+  optionalAuth,
+  asyncHandler(async (req, res) => {
+    const { courseId, lessonId } = req.params;
+    const filename = req.params.filename || 'lesson-materials.pdf';
+    const filePath = path.join(uploadDir, filename);
+
+    import('fs').then(fs => {
+      fs.access(filePath, fs.constants.F_OK, async (err) => {
+        if (err) {
+          return notFound(res, 'File');
+        }
+
+        // Check enrollment: student must be enrolled in this course
+        if (req.user) {
+          const course = await Course.findById(courseId);
+          if (course) {
+            const isEnrolled = course.enrolledStudents?.includes(req.user.id);
+            if (!isEnrolled) {
+              return res.status(403).json({
+                message: 'You must be enrolled in this course to access its materials',
+              });
+            }
+          }
+        }
+
+        // Serve the PDF file
+        import('fs').then(fs => {
+          const stat = fs.statSync(filePath);
+          const fileSize = stat.size;
+          const range = req.headers.range;
+
+          if (range) {
+            const parts = range.replace(/bytes=/, '').split('-');
+            const start = parseInt(parts[0], 10);
+            const end = parseInt(parts[1], 10) || fileSize - 1;
+            const chunkSize = end - start + 1;
+
+            const { createReadStream } = fs;
+            const stream = createReadStream(filePath, { start, end });
+
+            const headers = {
+              'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+              'Accept-Ranges': 'bytes',
+              'Content-Length': chunkSize,
+              'Content-Type': 'application/pdf',
+            };
+
+            res.writeHead(206, headers);
+            stream.pipe(res);
+          } else {
+            const { createReadStream } = fs;
+            res.setHeader('Content-Length', fileSize);
+            res.setHeader('Content-Type', 'application/pdf');
+            // Force download rather than inline display
+            res.setHeader(
+              'Content-Disposition',
+              `attachment; filename="${filename}"`
+            );
+            createReadStream(filePath).pipe(res);
+          }
+        });
+      });
+    }).catch(() => {
+      return notFound(res, 'File');
+    });
+  })
+);
+
+// ---------- Course Routes ----------
 
 router.get('/', optionalAuth, asyncHandler(async (req, res) => {
   const user = req.user;
@@ -72,19 +152,23 @@ router.delete('/:courseId', requireAuth, asyncHandler(async (req, res) => {
   res.json({ id: req.params.courseId });
 }));
 
-router.post('/:courseId/lessons', requireAuth, asyncHandler(async (req, res) => {
+router.post('/:courseId/lessons', requireAuth, upload.single('pdf'), asyncHandler(async (req, res) => {
   const course = await Course.findById(req.params.courseId);
   if (!course) return notFound(res, 'Course');
   if (!canEditCourse(req.user, course)) {
     return res.status(403).json({ message: 'You cannot edit this course' });
   }
 
+  const { title, type } = req.body;
+  const pdfFile = req.file;
+
   const lesson = {
     id: randomUUID(),
-    title: req.body.title,
-    type: req.body.type || 'video',
-    videoUrl: req.body.videoUrl || '',
-    pdfUrl: req.body.pdfUrl || '',
+    title: title || 'Untitled Lesson',
+    type: type || 'video',
+    videoUrl: '',
+    // If a PDF was uploaded, set pdfUrl to the file serving route
+    pdfUrl: pdfFile ? `/api/files/${pdfFile.filename}` : '',
     duration: req.body.duration || '',
     quiz: req.body.quiz || { questions: [], passingScore: 70 },
     order: course.lessons.length + 1

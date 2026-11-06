@@ -107,20 +107,29 @@ const Lesson = () => {
             <div className="pdf-preview">
               <FaFilePdf className="pdf-icon" />
               <h3>{lesson.title}</h3>
-              <p>Click the button below to download the PDF resource</p>
-              <a 
-                href={lesson.pdfUrl || '#'} 
-                download 
-                className="btn btn-download"
-                onClick={(e) => {
-                  if (!lesson.pdfUrl || lesson.pdfUrl === '#') {
-                    e.preventDefault();
-                    alert('PDF file is not available for this demo');
-                  }
-                }}
-              >
-                <FaDownload /> Download PDF
-              </a>
+              {enrolled && lesson.pdfUrl ? (
+                <>
+                  <a
+                    href={`/api/files/${lesson.pdfUrl}`} 
+                    className="btn btn-view"
+                    target="_blank"
+                    rel="noopener"
+                  >
+                    <FaFilePdf /> View PDF
+                  </a>
+                  <a
+                    href={`/api/files/${lesson.pdfUrl}`} 
+                    download
+                    className="btn btn-download"
+                  >
+                    <FaDownload /> Download PDF
+                  </a>
+                </>
+              ) : (
+                <p>
+                  <em>PDF material not available for this lesson</em>
+                </p>
+              )}
             </div>
           </div>
         );
