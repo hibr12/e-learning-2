@@ -10,6 +10,7 @@
     "dev": "node server.js",
     "start": "node server.js",
     "build": "prisma generate",
+    "test": "node --test",
     "postinstall": "prisma generate",
     "migrate:dev": "prisma migrate dev",
     "migrate:deploy": "prisma migrate deploy",

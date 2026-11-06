@@ -100,7 +100,7 @@ src/
 
 ### Local development
 
-Use Node.js 22 LTS (Vite 7 requires Node 20.19+ or 22.12+) and npm. From the project root:
+Use Node.js 22 LTS (both package manifests require Node 22.12 or newer) and npm. From the project root:
 
 ```powershell
 Copy-Item backend\.env.example backend\.env
@@ -134,25 +134,40 @@ Use separate services: a PostgreSQL database (the current setup uses Neon), an A
 - Create a **Web Service** from this repository and set its root directory to `backend`.
 - Use Node.js 22 LTS.
 - Build command: `npm ci && npx prisma generate`
-- Pre-deploy command: `npx prisma migrate deploy`
+- Pre-deploy command for this login/CORS-only release: none; it makes no database schema changes.
 - Start command: `npm start`
 - Set these service environment variables:
   - `NODE_ENV=production`
   - `DATABASE_URL` (production pooled PostgreSQL URL)
   - `DIRECT_URL` (production direct PostgreSQL URL)
   - `JWT_SECRET` (a cryptographically random secret, at least 32 characters; never reuse the example value)
-  - `CORS_ORIGINS` (the exact Vercel production origin, e.g. `https://your-app.vercel.app`; comma-separate any additional trusted origins)
+  - `CORS_ORIGINS` (optional comma-separated additional trusted origins; the production Vercel origin and `http://localhost:5173` are explicitly allowed by the server)
   - `UPLOADS_DIR=/var/data/uploads` if using a mounted Render persistent disk at `/var/data`
 - Attach a persistent disk at `/var/data` before enabling PDF uploads. Without persistent storage, local uploads can disappear on redeploy/restart. For multiple API instances or larger deployments, use managed object storage instead.
 - Render supplies `PORT`; the server binds to `0.0.0.0`. After deployment, verify `https://YOUR-API.onrender.com/api/health` returns HTTP 200 and `{"ok":true,"database":"connected"}`.
+- The login/CORS fix changes no database schema; do not run a database migration for this code-only deployment.
 
 ### 3. Deploy the frontend to Vercel
 
 - Import the repository and set the project root directory to `frontend`.
+- Set Vercel's Node.js version to 22.x to satisfy `engines.node >=22.12.0`. A version override below that minimum could break the build, but it does not cause the observed OPTIONS 404.
 - Build command: `npm run build`; output directory: `dist`.
-- Set `VITE_API_URL=https://YOUR-API.onrender.com/api` in the Vercel production environment. This value is public frontend configuration, not a secret.
-- Deploy, copy the exact deployed origin into the backend's `CORS_ORIGINS`, then redeploy/restart the backend if needed.
+- Set `VITE_API_URL=https://e-learning-2-jm8l.onrender.com` in the Vercel production environment. Do not append `/api`; the frontend adds that prefix if it is missing. This value is public frontend configuration, not a secret. The older `VITE_API_BASE_URL` name is also supported for existing environments.
+- Deploy the frontend and backend after setting their configuration.
 - Test direct navigation and refresh on nested routes, registration/login, course browsing, enrollment, quiz submission, certificates, and PDF access.
+
+The backend login endpoint is `POST /api/auth/login`. `VITE_API_URL` (or the legacy `VITE_API_BASE_URL`) is the backend origin; frontend requests append `/api` exactly once. The development fallback is `/api`, which the Vite dev server proxies to `http://localhost:5000`.
+
+After both deployments, verify the API preflight with:
+
+```powershell
+curl.exe -i -X OPTIONS https://e-learning-2-jm8l.onrender.com/api/auth/login `
+  -H "Origin: https://e-learning-2-livid.vercel.app" `
+  -H "Access-Control-Request-Method: POST" `
+  -H "Access-Control-Request-Headers: content-type,authorization"
+```
+
+Expect HTTP 204, `Access-Control-Allow-Origin: https://e-learning-2-livid.vercel.app`, allowed methods including `POST`, `Access-Control-Allow-Headers` including `Content-Type` and `Authorization`, and `Access-Control-Allow-Credentials: true`. Then log in through the Vercel app and confirm the Network tab sends `POST https://e-learning-2-jm8l.onrender.com/api/auth/login` after the successful OPTIONS request.
 
 ### 4. Before opening production
 
