@@ -5,19 +5,18 @@ const TOKEN_KEY = 'api_token';
 export const getToken = () => {
   try {
     return localStorage.getItem(TOKEN_KEY) || '';
-  } catch {
+  } catch (error) {
+    console.error('Unable to read the authentication token from browser storage', error);
     return '';
   }
 };
 
 export const setToken = (token) => {
-  try {
-    if (token) {
-      localStorage.setItem(TOKEN_KEY, token);
-    } else {
-      localStorage.removeItem(TOKEN_KEY);
-    }
-  } catch { }
+  if (token) {
+    localStorage.setItem(TOKEN_KEY, token);
+  } else {
+    localStorage.removeItem(TOKEN_KEY);
+  }
 };
 
 export const apiRequest = async (path, options = {}) => {

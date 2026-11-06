@@ -1,11 +1,13 @@
 import express from 'express';
 import bcrypt from 'bcryptjs';
-import User from '../models/User.js';
+import { prisma } from '../config/db.js';
 import { requireAuth } from '../middleware/auth.js';
 import { asyncHandler } from '../utils/errors.js';
 import { createToken } from '../utils/tokens.js';
+import { getUserDto, userInclude } from '../utils/serializers.js';
 
 const router = express.Router();
+const validRoles = ['student', 'instructor'];
 
 router.post('/register', asyncHandler(async (req, res) => {
   const { name, email, password, role = 'student', bio = '' } = req.body;
@@ -13,26 +15,38 @@ router.post('/register', asyncHandler(async (req, res) => {
   if (!name || !email || !password) {
     return res.status(400).json({ message: 'Name, email, and password are required' });
   }
+  if (!validRoles.includes(role)) {
+    return res.status(400).json({ message: 'Role must be student or instructor' });
+  }
 
-  const existingUser = await User.findOne({ email });
+  const normalizedEmail = email.trim().toLowerCase();
+  const existingUser = await prisma.user.findUnique({ where: { email: normalizedEmail } });
   if (existingUser) {
     return res.status(409).json({ message: 'Email already registered' });
   }
 
-  const user = await User.create({
-    name,
-    email,
-    password: await bcrypt.hash(password, 10),
-    role,
-    bio,
-    isApproved: role === 'student',
-    enrolledCourses: [],
-    progress: {},
-    certificates: [],
-    completedQuizzes: {}
-  });
+  let user;
+  try {
+    user = await prisma.user.create({
+      data: {
+        name: name.trim(),
+        email: normalizedEmail,
+        password: await bcrypt.hash(password, 10),
+        role,
+        bio,
+        isApproved: role === 'student'
+      },
+      include: userInclude
+    });
+  } catch (error) {
+    if (error.code === 'P2002') {
+      return res.status(409).json({ message: 'Email already registered' });
+    }
+    throw error;
+  }
 
-  const payload = { user: user.toJSON() };
+  const userDto = await getUserDto(prisma, user.id);
+  const payload = { user: userDto };
   if (user.isApproved) {
     payload.token = createToken(user);
   }
@@ -42,7 +56,13 @@ router.post('/register', asyncHandler(async (req, res) => {
 
 router.post('/login', asyncHandler(async (req, res) => {
   const { email, password } = req.body;
-  const user = await User.findOne({ email });
+  if (!email || !password) {
+    return res.status(400).json({ message: 'Email and password are required' });
+  }
+  const user = await prisma.user.findUnique({
+    where: { email: email.trim().toLowerCase() },
+    include: userInclude
+  });
 
   if (!user || !(await bcrypt.compare(password, user.password))) {
     return res.status(401).json({ message: 'Invalid email or password' });
@@ -56,23 +76,22 @@ router.post('/login', asyncHandler(async (req, res) => {
     return res.status(403).json({ message: 'Your account is pending approval. Please wait for admin approval.' });
   }
 
-  res.json({ user: user.toJSON(), token: createToken(user) });
+  res.json({ user: await getUserDto(prisma, user.id), token: createToken(user) });
 }));
 
 router.get('/me', requireAuth, asyncHandler(async (req, res) => {
-  res.json({ user: req.user.toJSON() });
+  res.json({ user: await getUserDto(prisma, req.user.id) });
 }));
 
 router.patch('/me', requireAuth, asyncHandler(async (req, res) => {
-  const allowed = ['name', 'bio'];
-  allowed.forEach((key) => {
-    if (req.body[key] !== undefined) {
-      req.user[key] = req.body[key];
-    }
-  });
+  const data = {};
+  for (const key of ['name', 'bio']) {
+    if (req.body[key] !== undefined) data[key] = req.body[key];
+  }
+  if (typeof data.name === 'string') data.name = data.name.trim();
 
-  await req.user.save();
-  res.json({ user: req.user.toJSON() });
+  await prisma.user.update({ where: { id: req.user.id }, data });
+  res.json({ user: await getUserDto(prisma, req.user.id) });
 }));
 
 export default router;

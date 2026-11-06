@@ -1,7 +1,7 @@
 # Online Learning Platform - Analysis Report
 
 ## Architecture Overview
-- **Backend**: Express.js + MongoDB (Mongoose) REST API running on port 5000
+- **Backend**: Express.js + Neon PostgreSQL (Prisma) REST API running on port 5000
 - **Frontend**: React (Vite) dev server running on port 5173 with proxy to backend
 - **Connection**: Frontend uses `VITE_API_URL` env var (defaults to `/api`), Vite proxy forwards `/api` requests to `http://localhost:5000`
 

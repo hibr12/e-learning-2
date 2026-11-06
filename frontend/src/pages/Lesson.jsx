@@ -17,6 +17,8 @@ const Lesson = () => {
   const course = getCourse(courseId);
   const enrolled = isEnrolled(courseId);
   const lesson = course?.lessons?.find(l => l.id === lessonId);
+  const passingScore = lesson?.quiz?.passingScore || 70;
+  const quizPassed = quizScore !== null && quizScore >= passingScore;
   const lessonIndex = course?.lessons?.findIndex(l => l.id === lessonId) ?? -1;
   const prevLesson = lessonIndex > 0 ? course.lessons[lessonIndex - 1] : null;
   const nextLesson = course && lessonIndex >= 0 && lessonIndex < course.lessons.length - 1 ? course.lessons[lessonIndex + 1] : null;
@@ -57,23 +59,15 @@ const Lesson = () => {
   };
 
   const handleQuizSubmit = async () => {
-    const quiz = lesson.quiz;
-    let correct = 0;
-    
-    quiz.questions.forEach(q => {
-      if (quizAnswers[q.id] === q.correctAnswer) {
-        correct++;
-      }
-    });
-
-    const score = Math.round((correct / quiz.questions.length) * 100);
-    setQuizScore(score);
+    const result = await submitQuiz(courseId, lessonId, quizAnswers);
+    setQuizScore(result.score);
     setQuizSubmitted(true);
-    await submitQuiz(courseId, lessonId, quizAnswers, score);
   };
 
   const handleAnswerSelect = (questionId, answerIndex) => {
-    if (quizSubmitted) return;
+    if (quizPassed) return;
+    setQuizSubmitted(false);
+    setQuizScore(null);
     setQuizAnswers(prev => ({ ...prev, [questionId]: answerIndex }));
   };
 
@@ -110,7 +104,7 @@ const Lesson = () => {
               {enrolled && lesson.pdfUrl ? (
                 <>
                   <a
-                    href={`/api/files/${lesson.pdfUrl}`} 
+                    href={lesson.pdfUrl}
                     className="btn btn-view"
                     target="_blank"
                     rel="noopener"
@@ -118,7 +112,7 @@ const Lesson = () => {
                     <FaFilePdf /> View PDF
                   </a>
                   <a
-                    href={`/api/files/${lesson.pdfUrl}`} 
+                    href={lesson.pdfUrl}
                     download
                     className="btn btn-download"
                   >
@@ -164,13 +158,9 @@ const Lesson = () => {
                   <div className="options-list">
                     {question.options.map((option, oIndex) => {
                       const isSelected = quizAnswers[question.id] === oIndex;
-                      const isCorrect = question.correctAnswer === oIndex;
                       let optionClass = 'option-item';
                       
-                      if (quizSubmitted) {
-                        if (isCorrect) optionClass += ' correct';
-                        else if (isSelected && !isCorrect) optionClass += ' incorrect';
-                      } else if (isSelected) {
+                      if (isSelected) {
                         optionClass += ' selected';
                       }
 
@@ -179,11 +169,10 @@ const Lesson = () => {
                           key={oIndex}
                           className={optionClass}
                           onClick={() => handleAnswerSelect(question.id, oIndex)}
-                          disabled={quizSubmitted}
+                          disabled={quizPassed}
                         >
                           <span className="option-letter">{String.fromCharCode(65 + oIndex)}</span>
                           <span className="option-text">{option}</span>
-                          {quizSubmitted && isCorrect && <FaCheckCircle className="correct-icon" />}
                         </button>
                       );
                     })}
@@ -192,13 +181,13 @@ const Lesson = () => {
               ))}
             </div>
 
-            {!quizSubmitted && (
+            {!quizPassed && (
               <button 
                 className="btn btn-submit-quiz"
                 onClick={handleQuizSubmit}
-                disabled={Object.keys(quizAnswers).length !== lesson.quiz?.questions.length}
+                disabled={!lesson.quiz?.questions.length || Object.keys(quizAnswers).length !== lesson.quiz?.questions.length}
               >
-                Submit Quiz
+                {quizSubmitted ? 'Retry Quiz' : 'Submit Quiz'}
               </button>
             )}
           </div>

@@ -1,47 +1,90 @@
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
-import { connectDb } from './config/db.js';
-import { seedDatabase } from './seed.js';
+import { connectDb, prisma } from './config/db.js';
 import authRoutes from './routes/authRoutes.js';
 import courseRoutes from './routes/courseRoutes.js';
 import adminRoutes from './routes/adminRoutes.js';
+import fileRoutes from './routes/fileRoutes.js';
 
 const app = express();
-const port = process.env.PORT || 5000;
+const port = Number(process.env.PORT || 5000);
+const isProduction = process.env.NODE_ENV === 'production';
+const configuredOrigins = (process.env.CORS_ORIGINS || '')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+const allowedOrigins = new Set(
+  configuredOrigins.length ? configuredOrigins : ['http://localhost:5173']
+);
 
 app.use(cors({
-  origin: [
-    "http://localhost:5173",                 // local dev
-    "https://e-learning-2-livid.vercel.app"  // deployed frontend
-  ],
+  origin: (origin, callback) => callback(null, !origin || allowedOrigins.has(origin)),
   credentials: true
 }));
+app.disable('x-powered-by');
 app.use(express.json({ limit: '1mb' }));
 
-app.get('/api/health', (_req, res) => {
-  res.json({ ok: true, database: 'connected' });
+app.get('/api/health', async (_req, res) => {
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    res.json({ ok: true, database: 'connected' });
+  } catch (error) {
+    console.error('Health check failed', { name: error.name, code: error.code });
+    res.status(503).json({ ok: false, database: 'unavailable' });
+  }
 });
 
 app.use('/api/auth', authRoutes);
+app.use('/api/files', fileRoutes);
 app.use('/api/courses', courseRoutes);
 app.use('/api/admin', adminRoutes);
 
-app.use((err, _req, res, _next) => {
-  console.error(err);
-  res.status(err.status || 500).json({ message: err.message || 'Server error' });
+app.use('/api', (_req, res) => {
+  res.status(404).json({ message: 'API route not found' });
 });
 
-connectDb().then(() => {
-  seedDatabase().then(() => {
-    app.listen(port, () => {
-      console.log(`API server running on http://localhost:${port}`);
-    });
-  }).catch(err => {
-    console.error('Failed to seed database', err);
-    process.exit(1);
+app.use((err, _req, res, _next) => {
+  console.error('Request failed', { name: err.name, code: err.code });
+  const status = err.status || (err.name === 'MulterError' ? 400 : 500);
+  res.status(status).json({
+    message: status < 500 ? err.message : 'Server error'
   });
-}).catch(err => {
-  console.error('Failed to connect to database', err);
-  process.exit(1);
 });
+
+const startServer = async () => {
+  try {
+    if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32) {
+      throw new Error('JWT_SECRET must be configured with at least 32 characters.');
+    }
+    if (isProduction && configuredOrigins.length === 0) {
+      throw new Error('CORS_ORIGINS must contain the deployed frontend origin in production.');
+    }
+    if (!Number.isInteger(port) || port < 1 || port > 65535) {
+      throw new Error('PORT must be an integer between 1 and 65535.');
+    }
+
+    await connectDb();
+    const server = app.listen(port, '0.0.0.0', () => {
+      console.log(`API server listening on port ${port}`);
+    });
+
+    const shutdown = () => {
+      server.close(async () => {
+        await prisma.$disconnect();
+        process.exit(0);
+      });
+    };
+    process.once('SIGINT', shutdown);
+    process.once('SIGTERM', shutdown);
+  } catch (error) {
+    console.error('Failed to start API server', {
+      name: error.name,
+      code: error.code
+    });
+    await prisma.$disconnect();
+    process.exit(1);
+  }
+};
+
+startServer();

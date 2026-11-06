@@ -141,12 +141,13 @@ export const DataProvider = ({ children }) => {
     return progress.completedLessons.includes(lessonId);
   };
 
-  const submitQuiz = async (courseId, lessonId, answers, score) => {
-    await apiRequest(`/courses/${courseId}/quiz/${lessonId}`, {
+  const submitQuiz = async (courseId, lessonId, answers) => {
+    const data = await apiRequest(`/courses/${courseId}/quiz/${lessonId}`, {
       method: 'POST',
-      body: JSON.stringify({ answers, score })
+      body: JSON.stringify({ answers })
     });
-    return markLessonComplete(courseId, lessonId);
+    setUser(data.user);
+    return data;
   };
 
   const getQuizResult = (courseId, lessonId) => {

@@ -55,8 +55,8 @@ Course
 - **Icons:** React Icons
 - **Styling:** Custom CSS with modern design
 - **State Management:** React Context API
-- **Data Storage:** LocalStorage (can be replaced with Firebase/MongoDB)
-- **Authentication:** Custom auth system (can be replaced with Firebase Auth/JWT)
+- **Data Storage:** Neon PostgreSQL through Prisma
+- **Authentication:** JWT with bcrypt-hashed passwords
 
 ##  Project Structure
 
@@ -98,25 +98,82 @@ src/
 - Node.js (v18 or higher)
 - npm or yarn
 
-### Installation
+### Local development
 
-1. Install dependencies:
+Use Node.js 22 LTS (Vite 7 requires Node 20.19+ or 22.12+) and npm. From the project root:
 
-```bash
-npm install
+```powershell
+Copy-Item backend\.env.example backend\.env
 ```
 
-2. Start the development server:
+Set `DATABASE_URL`, `DIRECT_URL`, and a unique random `JWT_SECRET` (at least 32 characters) in `backend\.env`. Generate one with `node -e "console.log(require('node:crypto').randomBytes(48).toString('base64url'))"`. Keep this file private and out of source control. Then:
 
-```bash
+```powershell
+cd backend
+npm ci
+npx prisma migrate deploy
 npm run dev
 ```
 
-3. Open your browser and navigate to `http://localhost:5173`
+In another terminal, from the project root, run `npm ci` and `npm run dev` to start the frontend and backend together. Run `npm run seed` only for a throwaway development database; it creates well-known demo credentials and must never be run against production.
 
-##  Demo Accounts
+## Production deployment (Render API + Vercel frontend)
 
-The platform comes with pre-configured demo accounts:
+Use separate services: a PostgreSQL database (the current setup uses Neon), an API service, and a static frontend. Deploy a staging environment first and verify it before sending users to production.
+
+### 1. Prepare the database
+
+- Create a production PostgreSQL database and keep its credentials private.
+- Use the pooled connection string for `DATABASE_URL` and the direct connection string for `DIRECT_URL`.
+- Back up any existing database before changing schemas or importing data.
+- The project uses Prisma migrations. On a new empty database, run `npx prisma migrate deploy` before switching traffic. If tables already exist, do not run the initial migration blindly: back up the database, verify its schema matches the migration, then baseline it with `npx prisma migrate resolve --applied 20261106200000_init`. If it differs, create and review a data-preserving migration first. Do not run `prisma migrate dev` or seed demo users in production.
+- MongoDB data is not automatically migrated. If replacing an existing MongoDB deployment, plan and test a separate export/transform/import, then verify record counts and relationships before cutover.
+
+### 2. Deploy the backend to Render
+
+- Create a **Web Service** from this repository and set its root directory to `backend`.
+- Use Node.js 22 LTS.
+- Build command: `npm ci && npx prisma generate`
+- Pre-deploy command: `npx prisma migrate deploy`
+- Start command: `npm start`
+- Set these service environment variables:
+  - `NODE_ENV=production`
+  - `DATABASE_URL` (production pooled PostgreSQL URL)
+  - `DIRECT_URL` (production direct PostgreSQL URL)
+  - `JWT_SECRET` (a cryptographically random secret, at least 32 characters; never reuse the example value)
+  - `CORS_ORIGINS` (the exact Vercel production origin, e.g. `https://your-app.vercel.app`; comma-separate any additional trusted origins)
+  - `UPLOADS_DIR=/var/data/uploads` if using a mounted Render persistent disk at `/var/data`
+- Attach a persistent disk at `/var/data` before enabling PDF uploads. Without persistent storage, local uploads can disappear on redeploy/restart. For multiple API instances or larger deployments, use managed object storage instead.
+- Render supplies `PORT`; the server binds to `0.0.0.0`. After deployment, verify `https://YOUR-API.onrender.com/api/health` returns HTTP 200 and `{"ok":true,"database":"connected"}`.
+
+### 3. Deploy the frontend to Vercel
+
+- Import the repository and set the project root directory to `frontend`.
+- Build command: `npm run build`; output directory: `dist`.
+- Set `VITE_API_URL=https://YOUR-API.onrender.com/api` in the Vercel production environment. This value is public frontend configuration, not a secret.
+- Deploy, copy the exact deployed origin into the backend's `CORS_ORIGINS`, then redeploy/restart the backend if needed.
+- Test direct navigation and refresh on nested routes, registration/login, course browsing, enrollment, quiz submission, certificates, and PDF access.
+
+### 4. Before opening production
+
+- Register a new account, then promote that account to the initial admin using a controlled database session (substitute the exact email):
+
+  ```sql
+  UPDATE "User"
+  SET "role" = 'admin', "isApproved" = true
+  WHERE "email" = 'your-admin@example.com';
+  ```
+
+  Verify exactly one row changed, then sign out and sign back in. Never expose or use the seeded demo admin credentials.
+- Confirm HTTPS is enabled, environment secrets are set only in provider dashboards, database backups are configured, and the health check is monitored.
+- Test the full student/instructor/admin workflows in staging, including a failed quiz and a passing quiz. Confirm an instructor cannot self-approve a course and students cannot retrieve quiz answer keys.
+- Resolve the remaining high-severity Prisma 6.19 CLI dependency advisories before public launch; the available fix is a major Prisma upgrade and needs its own schema/client validation.
+- Set up error monitoring and alerting, review database/storage usage, and document a rollback plan. Rehearse restoring a database backup before relying on it.
+- If changing any secret or database URL, update the provider environment and redeploy; rotate credentials immediately if they were ever committed or shared.
+
+##  Development Demo Accounts
+
+`npm run seed` creates the following demo accounts for local development only. Never run the seed script against a production database:
 
 | Role       | Email                | Password      |
 | ---------- | -------------------- | ------------- |
@@ -206,16 +263,16 @@ The platform comes with pre-configured demo accounts:
 - ✅ Error handling
 - ✅ Form validation
 
-##  Security Features
+##  Security Notes
 
-- ✅ Protected routes based on user roles
-- ✅ Password encoding (basic - use proper hashing in production)
-- ✅ Input validation
-- ✅ Session management
+- Passwords are hashed with bcrypt; API access uses signed JWTs and role checks.
+- Quiz scores are calculated on the server and answer keys are not returned to students.
+- Production CORS origins and JWT secret are required at backend startup.
+- Configure HTTPS, production secrets, database backups, and persistent/object storage before launch.
 
 ##  Future Enhancements
 
-- [ ] Firebase/MongoDB integration
+- [x] PostgreSQL integration
 - [ ] Real-time notifications
 - [ ] Discussion forums
 - [ ] Instructor ratings and reviews
